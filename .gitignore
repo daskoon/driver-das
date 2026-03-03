@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+app/build/
+*.pyc
+
+# Android
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Takeout (Personal Data)
+Takeout/
+*.jpg
+mileage_report.md
+EOF
