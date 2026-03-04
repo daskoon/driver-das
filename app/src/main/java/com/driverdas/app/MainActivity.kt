@@ -11,23 +11,43 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.driverdas.app.db.ShiftEntity
 import java.text.SimpleDateFormat
 import java.util.*
+
+// --- Midnight Theme Colors ---
+private val MidnightBlack = Color(0xFF0A0E14)
+private val DeepCharcoal = Color(0xFF161B22)
+private val NeonBlue = Color(0xFF00D2FF)
+private val NeonGreen = Color(0xFF39FF14)
+private val GlassWhite = Color(0x1AFFFFFF)
 
 class MainActivity : ComponentActivity() {
 
@@ -43,18 +63,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    val viewModel: DashboardViewModel = viewModel()
-                    DashboardScreen(
-                        viewModel = viewModel,
-                        onPermissionRequest = { requestInitialPermissions() }
-                    )
-                }
-            }
+            DashboardApp()
         }
     }
 
@@ -80,6 +89,28 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    @Composable
+    fun DashboardApp() {
+        val viewModel: DashboardViewModel = viewModel()
+        
+        MaterialTheme(
+            colorScheme = darkColorScheme(
+                primary = NeonBlue,
+                background = MidnightBlack,
+                surface = DeepCharcoal,
+                onBackground = Color.White,
+                onSurface = Color.White
+            )
+        ) {
+            Surface(modifier = Modifier.fillMaxSize(), color = MidnightBlack) {
+                DashboardScreen(
+                    viewModel = viewModel,
+                    onPermissionRequest = { requestInitialPermissions() }
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -91,72 +122,172 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(20.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Driver DAS", style = MaterialTheme.typography.displaySmall)
-        
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = if (isTracking) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-            )
+        // Top App Bar Area
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text("Current Shift Mileage", style = MaterialTheme.typography.titleMedium)
-                Text(
-                    "${"%.2f".format(mileage)} mi", 
-                    style = MaterialTheme.typography.displayMedium
+            Text(
+                "DRIVER DAS",
+                style = MaterialTheme.typography.titleLarge.copy(
+                    letterSpacing = 4.sp,
+                    fontWeight = FontWeight.Black,
+                    color = NeonBlue
                 )
-                Spacer(modifier = Modifier.height(8.dp))
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            Icon(Icons.Default.History, contentDescription = null, tint = Color.Gray)
+        }
+
+        // --- Main Gauge Area ---
+        Box(
+            modifier = Modifier.size(280.dp).padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator(
+                progress = 1f,
+                modifier = Modifier.fillMaxSize(),
+                color = GlassWhite,
+                strokeWidth = 12.dp,
+                strokeCap = StrokeCap.Round
+            )
+            
+            val animatedProgress by animateFloatAsState(
+                targetValue = (mileage % 10 / 10).toFloat(), // Gauge loops every 10 miles for visual flair
+                label = "progress"
+            )
+            
+            CircularProgressIndicator(
+                progress = if (isTracking) animatedProgress else 0f,
+                modifier = Modifier.fillMaxSize(),
+                color = NeonBlue,
+                strokeWidth = 12.dp,
+                strokeCap = StrokeCap.Round
+            )
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "Est. Deduction: $${"%.2f".format(TaxConfig.calculateDeduction(mileage))}",
-                    style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "%.2f".format(mileage),
+                    style = MaterialTheme.typography.displayLarge.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 64.sp
+                    )
+                )
+                Text(
+                    "MILES TRACKED",
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        color = Color.Gray,
+                        letterSpacing = 2.sp
+                    )
                 )
             }
         }
 
+        // --- Stats Row ---
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(DeepCharcoal)
+                .padding(20.dp),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            StatItem(
+                label = "DEDUCTION",
+                value = "$${"%.2f".format(TaxConfig.calculateDeduction(mileage))}",
+                color = NeonGreen
+            )
+            VerticalDivider(modifier = Modifier.height(40.dp).width(1.dp), color = GlassWhite)
+            StatItem(
+                label = "STATUS",
+                value = if (isTracking) "ACTIVE" else "IDLE",
+                color = if (isTracking) NeonBlue else Color.Gray
+            )
+        }
+
         Spacer(modifier = Modifier.height(32.dp))
 
+        // --- Main Action Button ---
         Button(
             onClick = {
                 onPermissionRequest()
                 viewModel.toggleShift()
             },
-            modifier = Modifier.fillMaxWidth(0.7f).height(64.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(80.dp)
+                .border(2.dp, if (isTracking) Color.Red.copy(alpha = 0.5f) else NeonBlue.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (isTracking) Color.Red else Color.Green
-            )
+                containerColor = if (isTracking) Color.Transparent else NeonBlue.copy(alpha = 0.1f)
+            ),
+            shape = RoundedCornerShape(20.dp)
         ) {
-            Icon(if (isTracking) Icons.Default.Stop else Icons.Default.PlayArrow, contentDescription = null)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(if (isTracking) "Stop Shift" else "Start Shift")
+            Icon(
+                if (isTracking) Icons.Default.Stop else Icons.Default.PlayArrow,
+                contentDescription = null,
+                tint = if (isTracking) Color.Red else NeonBlue,
+                modifier = Modifier.size(32.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                if (isTracking) "END SHIFT" else "BEGIN TRACKING",
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.sp,
+                    color = if (isTracking) Color.Red else NeonBlue
+                )
+            )
         }
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        Text("Recent History", style = MaterialTheme.typography.titleLarge, modifier = Modifier.align(Alignment.Start))
+        // --- History List ---
+        Text(
+            "RECENT SHIFTS",
+            modifier = Modifier.align(Alignment.Start).padding(bottom = 12.dp),
+            style = MaterialTheme.typography.labelLarge.copy(color = Color.Gray, letterSpacing = 1.sp)
+        )
         
-        LazyColumn(modifier = Modifier.fillMaxWidth()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
             items(pastShifts) { shift ->
-                ShiftItem(shift)
+                MidnightShiftItem(shift)
             }
         }
     }
 }
 
 @Composable
-fun ShiftItem(shift: ShiftEntity) {
-    val dateFormat = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
-    ListItem(
-        headlineContent = { Text("${"%.2f".format(shift.totalMiles)} miles") },
-        supportingContent = { Text(dateFormat.format(Date(shift.startTime))) },
-        trailingContent = { Text("-$${"%.2f".format(shift.earnings)}") }
-    )
+fun StatItem(label: String, value: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(label, style = MaterialTheme.typography.labelSmall.copy(color = Color.Gray))
+        Text(value, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = color))
+    }
+}
+
+@Composable
+fun MidnightShiftItem(shift: ShiftEntity) {
+    val dateFormat = SimpleDateFormat("MMM dd · HH:mm", Locale.getDefault())
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp))
+            .background(GlassWhite)
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(dateFormat.format(Date(shift.startTime)), style = MaterialTheme.typography.bodySmall.copy(color = Color.Gray))
+            Text("${"%.2f".format(shift.totalMiles)} Miles", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold))
+        }
+        Text(
+            "-$${"%.2f".format(shift.earnings)}",
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = NeonGreen)
+        )
+    }
 }
