@@ -10,6 +10,8 @@ import android.location.Location
 import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
+import com.driverdas.app.db.AppDatabase
+import com.driverdas.app.db.LocationPointEntity
 import com.google.android.gms.location.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,9 +22,11 @@ class LocationService : Service() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
+    private lateinit var db: AppDatabase
     
     private var lastLocation: Location? = null
     private var totalDistanceMiles: Double = 0.0
+    private var currentShiftId: Long = -1
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "location_tracking_channel"
@@ -37,6 +41,7 @@ class LocationService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        db = AppDatabase.getDatabase(this)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
         
@@ -50,6 +55,7 @@ class LocationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        currentShiftId = intent?.getLongExtra("SHIFT_ID", -1) ?: -1
         startForeground(NOTIFICATION_ID, createNotification())
         startLocationUpdates()
         _isTracking.value = true
@@ -81,6 +87,20 @@ class LocationService : Service() {
             
             // Update notification with live mileage
             updateNotification()
+
+            // Save point to DB
+            if (currentShiftId != -1L) {
+                serviceScope.launch {
+                    db.locationPointDao().insertLocationPoint(
+                        LocationPointEntity(
+                            shiftId = currentShiftId,
+                            lat = newLocation.latitude,
+                            lng = newLocation.longitude,
+                            timestamp = System.currentTimeMillis()
+                        )
+                    )
+                }
+            }
         }
         lastLocation = newLocation
     }

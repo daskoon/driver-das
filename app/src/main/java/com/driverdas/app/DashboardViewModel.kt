@@ -20,6 +20,8 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     val pastShifts: StateFlow<List<ShiftEntity>> = shiftDao.getAllShifts()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    private var currentShiftId: Long = -1
+
     fun toggleShift() {
         if (isTracking.value) {
             stopShift()
@@ -29,16 +31,18 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     }
 
     private fun startShift() {
-        val intent = Intent(getApplication(), LocationService::class.java)
-        getApplication<Application>().startForegroundService(intent)
-        
-        // Also start floating dashboard
-        val floatIntent = Intent(getApplication(), FloatingService::class.java)
-        getApplication<Application>().startService(floatIntent)
-
         viewModelScope.launch {
             val newShift = ShiftEntity(startTime = System.currentTimeMillis())
-            shiftDao.insertShift(newShift)
+            currentShiftId = shiftDao.insertShift(newShift)
+
+            val intent = Intent(getApplication(), LocationService::class.java).apply {
+                putExtra("SHIFT_ID", currentShiftId)
+            }
+            getApplication<Application>().startForegroundService(intent)
+            
+            // Also start floating dashboard
+            val floatIntent = Intent(getApplication(), FloatingService::class.java)
+            getApplication<Application>().startService(floatIntent)
         }
     }
 
@@ -49,6 +53,16 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         val floatIntent = Intent(getApplication(), FloatingService::class.java)
         getApplication<Application>().stopService(floatIntent)
 
-        // Logic to update the last shift with final mileage would go here
+        viewModelScope.launch {
+            val lastShift = shiftDao.getAllShifts().first().firstOrNull()
+            lastShift?.let {
+                val updatedShift = it.copy(
+                    endTime = System.currentTimeMillis(),
+                    totalMiles = currentMileage.value
+                )
+                shiftDao.updateShift(updatedShift)
+            }
+            currentShiftId = -1
+        }
     }
 }
