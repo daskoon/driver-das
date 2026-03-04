@@ -12,9 +12,7 @@ object Logger {
 
     fun log(context: Context, tag: String, message: String, throwable: Throwable? = null) {
         val timestamp = dateFormat.format(Date())
-        val logEntry = "[$timestamp] [$tag] $message ${throwable?.let { "
-${Log.getStackTraceString(it)}" } ?: ""}
-"
+        val logEntry = "[$timestamp] [$tag] $message" + (throwable?.let { "\n${Log.getStackTraceString(it)}" } ?: "") + "\n"
         
         // Console log
         Log.d(tag, message, throwable)
