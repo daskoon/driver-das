@@ -200,7 +200,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
                 value = "$${"%.2f".format(TaxConfig.calculateDeduction(mileage))}",
                 color = NeonGreen
             )
-            VerticalDivider(modifier = Modifier.height(40.dp).width(1.dp), color = GlassWhite)
+            Box(modifier = Modifier.height(40.dp).width(1.dp).background(GlassWhite))
             StatItem(
                 label = "STATUS",
                 value = if (isTracking) "ACTIVE" else "IDLE",
