@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import android.view.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
@@ -40,6 +41,7 @@ class FloatingService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Logger.log(this, "FloatingService", "Overlay Created")
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         
         composeView = ComposeView(this).apply {
@@ -99,7 +101,11 @@ class FloatingService : Service() {
         params.x = 100
         params.y = 100
 
-        windowManager.addView(composeView, params)
+        try {
+            windowManager.addView(composeView, params)
+        } catch (e: Exception) {
+            Logger.log(this, "FloatingService", "Failed to add overlay view", e)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -107,6 +113,7 @@ class FloatingService : Service() {
     }
 
     override fun onDestroy() {
+        Logger.log(this, "FloatingService", "Overlay Destroyed")
         super.onDestroy()
         try {
             windowManager.removeView(composeView)
@@ -120,15 +127,37 @@ class FloatingService : Service() {
 
 @Composable
 fun FloatingBubble(onExpand: () -> Unit) {
-    Button(
-        onClick = onExpand,
-        modifier = Modifier
-            .size(60.dp)
-            .clip(CircleShape),
-        contentPadding = PaddingValues(0.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-    ) {
-        Text("TAX")
+    Box(contentAlignment = Alignment.Center) {
+        // Active Pulse
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val scale by infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.2f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1000, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "scale"
+        )
+        
+        Box(
+            modifier = Modifier
+                .size(50.dp)
+                .graphicsLayer(scaleX = scale, scaleY = scale)
+                .clip(CircleShape)
+                .background(Color(0xFF00D2FF).copy(alpha = 0.3f))
+        )
+
+        Button(
+            onClick = onExpand,
+            modifier = Modifier
+                .size(60.dp)
+                .clip(CircleShape),
+            contentPadding = PaddingValues(0.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+        ) {
+            Text("TAX", color = Color.Black, style = MaterialTheme.typography.labelSmall)
+        }
     }
 }
 
@@ -139,20 +168,26 @@ fun ExpandedCard(mileage: Double, onCollapse: () -> Unit) {
             .width(180.dp)
             .wrapContentHeight(),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF161B22)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x1AFFFFFF))
     ) {
         Column(
             modifier = Modifier.padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Mileage", style = MaterialTheme.typography.labelMedium)
-            Text("${"%.2f".format(mileage)} mi", style = MaterialTheme.typography.titleLarge)
+            Text("MILEAGE", style = MaterialTheme.typography.labelSmall.copy(color = Color.Gray))
+            Text("${"%.2f".format(mileage)} mi", style = MaterialTheme.typography.titleLarge.copy(color = Color.White))
             Spacer(modifier = Modifier.height(4.dp))
-            Text("Deduction", style = MaterialTheme.typography.labelSmall)
-            Text("$${"%.2f".format(TaxConfig.calculateDeduction(mileage))}", style = MaterialTheme.typography.titleMedium, color = Color(0xFF4CAF50))
+            Text("DEDUCTION", style = MaterialTheme.typography.labelSmall.copy(color = Color.Gray))
+            Text("$${"%.2f".format(TaxConfig.calculateDeduction(mileage))}", style = MaterialTheme.typography.titleMedium, color = Color(0xFF39FF14))
             Spacer(modifier = Modifier.height(12.dp))
-            Button(onClick = onCollapse, modifier = Modifier.fillMaxWidth()) {
-                Text("Hide", style = MaterialTheme.typography.labelSmall)
+            Button(
+                onClick = onCollapse, 
+                modifier = Modifier.fillMaxWidth().height(36.dp),
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0x1AFFFFFF))
+            ) {
+                Text("HIDE", style = MaterialTheme.typography.labelSmall.copy(color = Color.White))
             }
         }
     }

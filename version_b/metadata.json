@@ -1,0 +1,5 @@
+{
+  "name": "Driver DAS",
+  "description": "Mileage tracking and real-time tax deduction calculator for delivery drivers.",
+  "requestFramePermissions": ["geolocation"]
+}

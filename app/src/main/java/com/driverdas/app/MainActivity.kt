@@ -12,7 +12,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
@@ -29,10 +31,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -48,6 +48,7 @@ private val DeepCharcoal = Color(0xFF161B22)
 private val NeonBlue = Color(0xFF00D2FF)
 private val NeonGreen = Color(0xFF39FF14)
 private val GlassWhite = Color(0x1AFFFFFF)
+private val AlertRed = Color(0xFFFF3131)
 
 class MainActivity : ComponentActivity() {
 
@@ -62,6 +63,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Logger.log(this, "MainActivity", "App Launched")
         setContent {
             DashboardApp()
         }
@@ -139,7 +141,13 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
                 )
             )
             Spacer(modifier = Modifier.weight(1f))
-            Icon(Icons.Default.History, contentDescription = null, tint = Color.Gray)
+            
+            IconButton(onClick = { viewModel.exportData() }) {
+                Icon(Icons.Default.FileDownload, contentDescription = "Export CSV", tint = NeonGreen)
+            }
+            IconButton(onClick = { viewModel.clearLogs() }) {
+                Icon(Icons.Default.BugReport, contentDescription = "Clear Logs", tint = Color.Gray)
+            }
         }
 
         // --- Main Gauge Area ---
@@ -156,7 +164,8 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
             )
             
             val animatedProgress by animateFloatAsState(
-                targetValue = (mileage % 10 / 10).toFloat(), // Gauge loops every 10 miles for visual flair
+                targetValue = (mileage % 10 / 10).toFloat(),
+                animationSpec = tween(1000, easing = LinearOutSlowInEasing),
                 label = "progress"
             )
             
@@ -167,6 +176,28 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
                 strokeWidth = 12.dp,
                 strokeCap = StrokeCap.Round
             )
+
+            // --- Active Pulse Icon ---
+            if (isTracking) {
+                val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                val alpha by infiniteTransition.animateFloat(
+                    initialValue = 0.2f,
+                    targetValue = 1f,
+                    animationSpec = infiniteRepeatable(
+                        animation = tween(1000, easing = FastOutSlowInEasing),
+                        repeatMode = RepeatMode.Reverse
+                    ),
+                    label = "alpha"
+                )
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = 20.dp)
+                        .size(12.dp)
+                        .clip(CircleShape)
+                        .background(AlertRed.copy(alpha = alpha))
+                )
+            }
 
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
@@ -203,7 +234,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
             Box(modifier = Modifier.height(40.dp).width(1.dp).background(GlassWhite))
             StatItem(
                 label = "STATUS",
-                value = if (isTracking) "ACTIVE" else "IDLE",
+                value = if (isTracking) "TRACKING" else "IDLE",
                 color = if (isTracking) NeonBlue else Color.Gray
             )
         }
@@ -219,7 +250,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
             modifier = Modifier
                 .fillMaxWidth()
                 .height(80.dp)
-                .border(2.dp, if (isTracking) Color.Red.copy(alpha = 0.5f) else NeonBlue.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
+                .border(2.dp, if (isTracking) AlertRed.copy(alpha = 0.5f) else NeonBlue.copy(alpha = 0.5f), RoundedCornerShape(20.dp)),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (isTracking) Color.Transparent else NeonBlue.copy(alpha = 0.1f)
             ),
@@ -228,16 +259,16 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
             Icon(
                 if (isTracking) Icons.Default.Stop else Icons.Default.PlayArrow,
                 contentDescription = null,
-                tint = if (isTracking) Color.Red else NeonBlue,
+                tint = if (isTracking) AlertRed else NeonBlue,
                 modifier = Modifier.size(32.dp)
             )
             Spacer(modifier = Modifier.width(12.dp))
             Text(
-                if (isTracking) "END SHIFT" else "BEGIN TRACKING",
+                if (isTracking) "STOP DELIVERY" else "START DELIVERY",
                 style = MaterialTheme.typography.titleMedium.copy(
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 1.sp,
-                    color = if (isTracking) Color.Red else NeonBlue
+                    color = if (isTracking) AlertRed else NeonBlue
                 )
             )
         }
@@ -245,12 +276,17 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
         Spacer(modifier = Modifier.height(32.dp))
 
         // --- History List ---
-        Text(
-            "RECENT SHIFTS",
-            modifier = Modifier.align(Alignment.Start).padding(bottom = 12.dp),
-            style = MaterialTheme.typography.labelLarge.copy(color = Color.Gray, letterSpacing = 1.sp)
-        )
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.History, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                "RECENT TRIPS",
+                style = MaterialTheme.typography.labelLarge.copy(color = Color.Gray, letterSpacing = 1.sp)
+            )
+        }
         
+        Spacer(modifier = Modifier.height(12.dp))
+
         LazyColumn(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -286,7 +322,7 @@ fun MidnightShiftItem(shift: ShiftEntity) {
             Text("${"%.2f".format(shift.totalMiles)} Miles", style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold))
         }
         Text(
-            "-$${"%.2f".format(shift.earnings)}",
+            "+$${"%.2f".format(shift.earnings)}",
             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = NeonGreen)
         )
     }

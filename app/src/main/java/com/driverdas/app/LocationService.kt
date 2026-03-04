@@ -43,6 +43,7 @@ class LocationService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        Logger.log(this, "LocationService", "Service Created")
         db = AppDatabase.getDatabase(this)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         createNotificationChannel()
@@ -58,14 +59,16 @@ class LocationService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val shiftId = intent?.getLongExtra("SHIFT_ID", -1) ?: -1
+        Logger.log(this, "LocationService", "Service Started with Shift ID: $shiftId")
+        
         if (shiftId != -1L) {
             currentShiftId = shiftId
-            // Load existing mileage if this is a restart
             serviceScope.launch {
                 val shift = db.shiftDao().getShiftById(currentShiftId)
                 shift?.let {
                     totalDistanceMiles = it.totalMiles
                     _mileageFlow.value = totalDistanceMiles
+                    Logger.log(this@LocationService, "LocationService", "Resumed shift with $totalDistanceMiles miles")
                 }
             }
         }
@@ -87,22 +90,46 @@ class LocationService : Service() {
                 locationCallback,
                 Looper.getMainLooper()
             )
+            Logger.log(this, "LocationService", "GPS Updates Requested")
         } catch (e: SecurityException) {
+            Logger.log(this, "LocationService", "Security Exception requesting updates", e)
             stopSelf()
         }
     }
 
     private fun calculateAndUpdateMileage(newLocation: Location) {
+        // --- Jitter Filter Logic ---
+        // 1. Check accuracy
+        if (newLocation.accuracy > 20) {
+            Logger.log(this, "LocationService", "Skipping update: low accuracy (${newLocation.accuracy}m)")
+            return
+        }
+
         lastLocation?.let { last ->
             val distanceMeters = last.distanceTo(newLocation)
             val distanceMiles = distanceMeters * 0.000621371
+            
+            // 2. Threshold filter (0.001 miles ~ 5 feet)
+            if (distanceMiles < 0.001) {
+                return // Ignore tiny micro-movements (jitter)
+            }
+
+            // 3. Sanity check (Ignore jumps over 1000mph)
+            val timeDiffSeconds = (newLocation.time - last.time) / 1000.0
+            if (timeDiffSeconds > 0) {
+                val speedMph = (distanceMiles / timeDiffSeconds) * 3600
+                if (speedMph > 150) {
+                    Logger.log(this, "LocationService", "Skipping update: unrealistic speed ($speedMph mph)")
+                    return
+                }
+            }
+
             totalDistanceMiles += distanceMiles
             _mileageFlow.value = totalDistanceMiles
             
             updateNotification()
 
             if (currentShiftId != -1L) {
-                // Buffer the point
                 locationBuffer.add(
                     LocationPointEntity(
                         shiftId = currentShiftId,
@@ -112,10 +139,8 @@ class LocationService : Service() {
                     )
                 )
                 
-                // Persist mileage immediately or very frequently to avoid loss on OS kill
                 persistCurrentMileage()
 
-                // Periodic flush of points buffer
                 if (locationBuffer.size >= 10) {
                     flushBuffer()
                 }
@@ -128,12 +153,16 @@ class LocationService : Service() {
         val milesToSave = totalDistanceMiles
         val shiftId = currentShiftId
         serviceScope.launch {
-            val shift = db.shiftDao().getShiftById(shiftId)
-            shift?.let {
-                db.shiftDao().updateShift(it.copy(
-                    totalMiles = milesToSave,
-                    earnings = TaxConfig.calculateDeduction(milesToSave)
-                ))
+            try {
+                val shift = db.shiftDao().getShiftById(shiftId)
+                shift?.let {
+                    db.shiftDao().updateShift(it.copy(
+                        totalMiles = milesToSave,
+                        earnings = TaxConfig.calculateDeduction(milesToSave)
+                    ))
+                }
+            } catch (e: Exception) {
+                Logger.log(this@LocationService, "LocationService", "Failed to persist mileage", e)
             }
         }
     }
@@ -144,7 +173,11 @@ class LocationService : Service() {
         locationBuffer.clear()
         
         serviceScope.launch {
-            db.locationPointDao().insertLocationPoints(pointsToSave)
+            try {
+                db.locationPointDao().insertLocationPoints(pointsToSave)
+            } catch (e: Exception) {
+                Logger.log(this@LocationService, "LocationService", "Failed to flush location buffer", e)
+            }
         }
     }
 
@@ -175,6 +208,7 @@ class LocationService : Service() {
     }
 
     override fun onDestroy() {
+        Logger.log(this, "LocationService", "Service Destroyed")
         flushBuffer()
         persistCurrentMileage()
         fusedLocationClient.removeLocationUpdates(locationCallback)
