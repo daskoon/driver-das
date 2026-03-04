@@ -28,6 +28,9 @@ class LocationService : Service() {
     private var totalDistanceMiles: Double = 0.0
     private var currentShiftId: Long = -1
     
+    private var lastPersistTime: Long = 0
+    private var lastPersistedMiles: Double = 0.0
+    
     private val locationBuffer = mutableListOf<LocationPointEntity>()
 
     companion object {
@@ -67,6 +70,7 @@ class LocationService : Service() {
                 val shift = db.shiftDao().getShiftById(currentShiftId)
                 shift?.let {
                     totalDistanceMiles = it.totalMiles
+                    lastPersistedMiles = it.totalMiles
                     _mileageFlow.value = totalDistanceMiles
                     Logger.log(this@LocationService, "LocationService", "Resumed shift with $totalDistanceMiles miles")
                 }
@@ -98,26 +102,34 @@ class LocationService : Service() {
     }
 
     private fun calculateAndUpdateMileage(newLocation: Location) {
-        // --- Jitter Filter Logic ---
-        // 1. Check accuracy
+        // 1. Accuracy filter
         if (newLocation.accuracy > 20) {
             Logger.log(this, "LocationService", "Skipping update: low accuracy (${newLocation.accuracy}m)")
             return
         }
 
+        val currentTime = System.currentTimeMillis()
+        
         lastLocation?.let { last ->
+            // 2. Signal Gap Protection: Ignore jumps if signal was lost for more than 2 minutes
+            val timeSinceLastUpdate = newLocation.time - last.time
+            if (timeSinceLastUpdate > 120000) {
+                Logger.log(this, "LocationService", "Signal gap detected (${timeSinceLastUpdate/1000}s). Resetting baseline.")
+                lastLocation = newLocation
+                return@let
+            }
+
             val distanceMeters = last.distanceTo(newLocation)
             val distanceMiles = distanceMeters * 0.000621371
             
-            // 2. Threshold filter (0.001 miles ~ 5 feet)
+            // 3. Jitter filter (0.001 miles ~ 5 feet)
             if (distanceMiles < 0.001) {
-                return // Ignore tiny micro-movements (jitter)
+                return // Ignore micro-movements
             }
 
-            // 3. Sanity check (Ignore jumps over 1000mph)
-            val timeDiffSeconds = (newLocation.time - last.time) / 1000.0
-            if (timeDiffSeconds > 0) {
-                val speedMph = (distanceMiles / timeDiffSeconds) * 3600
+            // 4. Speed sanity check (Ignore jumps over 150mph)
+            if (timeSinceLastUpdate > 0) {
+                val speedMph = (distanceMiles / (timeSinceLastUpdate / 1000.0)) * 3600
                 if (speedMph > 150) {
                     Logger.log(this, "LocationService", "Skipping update: unrealistic speed ($speedMph mph)")
                     return
@@ -139,7 +151,15 @@ class LocationService : Service() {
                     )
                 )
                 
-                persistCurrentMileage()
+                // 5. Throttled Persistence: Save to DB every 30s OR every 0.1 miles
+                val milesSinceLastPersist = totalDistanceMiles - lastPersistedMiles
+                val timeSinceLastPersist = currentTime - lastPersistTime
+                
+                if (milesSinceLastPersist > 0.1 || timeSinceLastPersist > 30000) {
+                    persistCurrentMileage()
+                    lastPersistTime = currentTime
+                    lastPersistedMiles = totalDistanceMiles
+                }
 
                 if (locationBuffer.size >= 10) {
                     flushBuffer()

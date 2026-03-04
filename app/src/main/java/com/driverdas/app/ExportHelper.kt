@@ -10,8 +10,18 @@ object ExportHelper {
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
 
     fun exportShiftsToCsv(context: Context, shifts: List<ShiftEntity>): File? {
+        val dir = context.getExternalFilesDir(null) ?: return null
+        
+        // Cleanup old exports before creating a new one
+        try {
+            dir.listFiles { _, name -> name.startsWith("DriverDAS_History_") && name.endsWith(".csv") }
+                ?.forEach { it.delete() }
+        } catch (e: Exception) {
+            Logger.log(context, "Export", "Failed to clean up old CSVs", e)
+        }
+
         val fileName = "DriverDAS_History_${System.currentTimeMillis()}.csv"
-        val file = File(context.getExternalFilesDir(null), fileName)
+        val file = File(dir, fileName)
         
         try {
             file.printWriter().use { out ->
