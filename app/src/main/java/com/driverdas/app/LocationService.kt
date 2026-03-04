@@ -53,16 +53,15 @@ class LocationService : Service() {
         
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
-                locationResult.lastLocation?.let { location ->
-                    calculateAndUpdateMileage(location)
-                }
+                val location = locationResult.lastLocation ?: return
+                calculateAndUpdateMileage(location)
             }
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val shiftId = intent?.getLongExtra("SHIFT_ID", -1) ?: -1
-        Logger.log(this, "LocationService", "Service Started with Shift ID: $shiftId")
+        Logger.log(this, "LocationService", "Service Started - Shift ID: $shiftId")
         
         if (shiftId != -1L) {
             currentShiftId = shiftId
@@ -72,7 +71,7 @@ class LocationService : Service() {
                     totalDistanceMiles = it.totalMiles
                     lastPersistedMiles = it.totalMiles
                     _mileageFlow.value = totalDistanceMiles
-                    Logger.log(this@LocationService, "LocationService", "Resumed shift with $totalDistanceMiles miles")
+                    Logger.log(this@LocationService, "LocationService", "DB Load: Resumed with $totalDistanceMiles miles")
                 }
             }
         }
@@ -84,8 +83,8 @@ class LocationService : Service() {
     }
 
     private fun startLocationUpdates() {
-        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 5000)
-            .setMinUpdateIntervalMillis(2000)
+        val locationRequest = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 3000)
+            .setMinUpdateIntervalMillis(1000)
             .build()
 
         try {
@@ -94,76 +93,85 @@ class LocationService : Service() {
                 locationCallback,
                 Looper.getMainLooper()
             )
-            Logger.log(this, "LocationService", "GPS Updates Requested")
+            Logger.log(this, "LocationService", "GPS Updates Requested (1-3s intervals)")
         } catch (e: SecurityException) {
-            Logger.log(this, "LocationService", "Security Exception requesting updates", e)
+            Logger.log(this, "LocationService", "CRITICAL: Security Exception", e)
             stopSelf()
         }
     }
 
     private fun calculateAndUpdateMileage(newLocation: Location) {
-        // 1. Accuracy filter
-        if (newLocation.accuracy > 20) {
-            Logger.log(this, "LocationService", "Skipping update: low accuracy (${newLocation.accuracy}m)")
+        val currentTime = System.currentTimeMillis()
+        
+        // --- IMPROVED FILTERING ---
+        
+        // 1. Relaxed accuracy filter (50m instead of 20m for Samsung/pockets)
+        if (newLocation.accuracy > 50) {
+            Logger.log(this, "GPS", "Point Rejected: Bad Accuracy (${newLocation.accuracy}m)")
             return
         }
 
-        val currentTime = System.currentTimeMillis()
+        if (lastLocation == null) {
+            lastLocation = newLocation
+            Logger.log(this, "GPS", "Baseline Set: ${newLocation.latitude}, ${newLocation.longitude}")
+            return
+        }
+
+        val last = lastLocation!!
         
-        lastLocation?.let { last ->
-            // 2. Signal Gap Protection: Ignore jumps if signal was lost for more than 2 minutes
-            val timeSinceLastUpdate = newLocation.time - last.time
-            if (timeSinceLastUpdate > 120000) {
-                Logger.log(this, "LocationService", "Signal gap detected (${timeSinceLastUpdate/1000}s). Resetting baseline.")
-                lastLocation = newLocation
-                return@let
+        // 2. Signal Gap Protection
+        val timeSinceLastUpdate = newLocation.time - last.time
+        if (timeSinceLastUpdate > 180000) { // 3 minutes
+            Logger.log(this, "GPS", "Signal gap (>3m). Resetting baseline.")
+            lastLocation = newLocation
+            return
+        }
+
+        val distanceMeters = last.distanceTo(newLocation)
+        val distanceMiles = distanceMeters * 0.000621371
+        
+        // 3. Jitter filter (relaxed to 0.0005 miles ~ 2.6 feet)
+        if (distanceMiles < 0.0005) {
+            return 
+        }
+
+        // 4. Speed sanity check (Keep at 150mph)
+        if (timeSinceLastUpdate > 0) {
+            val speedMph = (distanceMiles / (timeSinceLastUpdate / 1000.0)) * 3600
+            if (speedMph > 150) {
+                Logger.log(this, "GPS", "Point Rejected: Impossible Speed ($speedMph mph)")
+                return
             }
+        }
 
-            val distanceMeters = last.distanceTo(newLocation)
-            val distanceMiles = distanceMeters * 0.000621371
-            
-            // 3. Jitter filter (0.001 miles ~ 5 feet)
-            if (distanceMiles < 0.001) {
-                return // Ignore micro-movements
-            }
+        // --- CALCULATION SUCCESS ---
+        totalDistanceMiles += distanceMiles
+        _mileageFlow.value = totalDistanceMiles
+        
+        updateNotification()
 
-            // 4. Speed sanity check (Ignore jumps over 150mph)
-            if (timeSinceLastUpdate > 0) {
-                val speedMph = (distanceMiles / (timeSinceLastUpdate / 1000.0)) * 3600
-                if (speedMph > 150) {
-                    Logger.log(this, "LocationService", "Skipping update: unrealistic speed ($speedMph mph)")
-                    return
-                }
-            }
-
-            totalDistanceMiles += distanceMiles
-            _mileageFlow.value = totalDistanceMiles
-            
-            updateNotification()
-
-            if (currentShiftId != -1L) {
-                locationBuffer.add(
-                    LocationPointEntity(
-                        shiftId = currentShiftId,
-                        lat = newLocation.latitude,
-                        lng = newLocation.longitude,
-                        timestamp = System.currentTimeMillis()
-                    )
+        if (currentShiftId != -1L) {
+            locationBuffer.add(
+                LocationPointEntity(
+                    shiftId = currentShiftId,
+                    lat = newLocation.latitude,
+                    lng = newLocation.longitude,
+                    timestamp = System.currentTimeMillis()
                 )
-                
-                // 5. Throttled Persistence: Save to DB every 30s OR every 0.1 miles
-                val milesSinceLastPersist = totalDistanceMiles - lastPersistedMiles
-                val timeSinceLastPersist = currentTime - lastPersistTime
-                
-                if (milesSinceLastPersist > 0.1 || timeSinceLastPersist > 30000) {
-                    persistCurrentMileage()
-                    lastPersistTime = currentTime
-                    lastPersistedMiles = totalDistanceMiles
-                }
+            )
+            
+            // 5. Throttled Persistence (DB save every 15s or 0.05 miles)
+            val milesSinceLastPersist = totalDistanceMiles - lastPersistedMiles
+            val timeSinceLastPersist = currentTime - lastPersistTime
+            
+            if (milesSinceLastPersist > 0.05 || timeSinceLastPersist > 15000) {
+                persistCurrentMileage()
+                lastPersistTime = currentTime
+                lastPersistedMiles = totalDistanceMiles
+            }
 
-                if (locationBuffer.size >= 10) {
-                    flushBuffer()
-                }
+            if (locationBuffer.size >= 10) {
+                flushBuffer()
             }
         }
         lastLocation = newLocation
@@ -180,9 +188,10 @@ class LocationService : Service() {
                         totalMiles = milesToSave,
                         earnings = TaxConfig.calculateDeduction(milesToSave)
                     ))
+                    Logger.log(this@LocationService, "DB", "Auto-Saved: $milesToSave miles")
                 }
             } catch (e: Exception) {
-                Logger.log(this@LocationService, "LocationService", "Failed to persist mileage", e)
+                Logger.log(this@LocationService, "DB", "Error saving mileage", e)
             }
         }
     }
@@ -195,8 +204,9 @@ class LocationService : Service() {
         serviceScope.launch {
             try {
                 db.locationPointDao().insertLocationPoints(pointsToSave)
+                Logger.log(this@LocationService, "DB", "Flushed ${pointsToSave.size} breadcrumbs")
             } catch (e: Exception) {
-                Logger.log(this@LocationService, "LocationService", "Failed to flush location buffer", e)
+                Logger.log(this@LocationService, "DB", "Error flushing buffer", e)
             }
         }
     }
@@ -215,10 +225,11 @@ class LocationService : Service() {
 
     private fun createNotification(): Notification {
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("Driver DAS Tracking")
-            .setContentText("Mileage: ${"%.2f".format(totalDistanceMiles)} miles")
+            .setContentTitle("Driver DAS Tracking Active")
+            .setContentText("Current Trip: ${"%.2f".format(totalDistanceMiles)} miles")
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setOngoing(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 
@@ -228,7 +239,7 @@ class LocationService : Service() {
     }
 
     override fun onDestroy() {
-        Logger.log(this, "LocationService", "Service Destroyed")
+        Logger.log(this, "LocationService", "Service Stopped - Total: $totalDistanceMiles miles")
         flushBuffer()
         persistCurrentMileage()
         fusedLocationClient.removeLocationUpdates(locationCallback)
