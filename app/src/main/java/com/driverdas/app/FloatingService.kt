@@ -6,6 +6,7 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import android.view.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -69,7 +70,9 @@ class FloatingService : Service() {
                                 params.y += dragAmount.y.toInt()
                                 try {
                                     windowManager.updateViewLayout(composeView, params)
-                                } catch (e: Exception) {}
+                                } catch (e: IllegalArgumentException) {
+                                    Log.e("FloatingService", "View not attached to window manager", e)
+                                }
                             }
                         }
                 ) {
@@ -82,7 +85,6 @@ class FloatingService : Service() {
             }
         }
 
-        // Use modern overlay type directly as minSdk is 26
         val layoutType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
         params = WindowManager.LayoutParams(
@@ -108,7 +110,9 @@ class FloatingService : Service() {
         super.onDestroy()
         try {
             windowManager.removeView(composeView)
-        } catch (e: Exception) {}
+        } catch (e: Exception) {
+            Log.e("FloatingService", "Error removing view", e)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -145,7 +149,7 @@ fun ExpandedCard(mileage: Double, onCollapse: () -> Unit) {
             Text("${"%.2f".format(mileage)} mi", style = MaterialTheme.typography.titleLarge)
             Spacer(modifier = Modifier.height(4.dp))
             Text("Deduction", style = MaterialTheme.typography.labelSmall)
-            Text("$${"%.2f".format(mileage * 0.67)}", style = MaterialTheme.typography.titleMedium, color = Color(0xFF4CAF50))
+            Text("$${"%.2f".format(TaxConfig.calculateDeduction(mileage))}", style = MaterialTheme.typography.titleMedium, color = Color(0xFF4CAF50))
             Spacer(modifier = Modifier.height(12.dp))
             Button(onClick = onCollapse, modifier = Modifier.fillMaxWidth()) {
                 Text("Hide", style = MaterialTheme.typography.labelSmall)

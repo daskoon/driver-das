@@ -60,8 +60,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 val updatedShift = it.copy(
                     endTime = System.currentTimeMillis(),
                     totalMiles = currentMileage.value,
-                    // Use standard mileage rate for 2024: $0.67
-                    earnings = currentMileage.value * 0.67 
+                    earnings = TaxConfig.calculateDeduction(currentMileage.value)
                 )
                 db.shiftDao().updateShift(updatedShift)
             }

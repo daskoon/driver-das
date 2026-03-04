@@ -115,7 +115,7 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    "Est. Deduction: $${"%.2f".format(mileage * 0.67)}",
+                    "Est. Deduction: $${"%.2f".format(TaxConfig.calculateDeduction(mileage))}",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

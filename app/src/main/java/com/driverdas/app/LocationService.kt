@@ -112,7 +112,10 @@ class LocationService : Service() {
                     )
                 )
                 
-                // Periodic save every 10 points or every few minutes
+                // Persist mileage immediately or very frequently to avoid loss on OS kill
+                persistCurrentMileage()
+
+                // Periodic flush of points buffer
                 if (locationBuffer.size >= 10) {
                     flushBuffer()
                 }
@@ -121,18 +124,27 @@ class LocationService : Service() {
         lastLocation = newLocation
     }
 
-    private fun flushBuffer() {
-        val pointsToSave = locationBuffer.toList()
-        locationBuffer.clear()
+    private fun persistCurrentMileage() {
         val milesToSave = totalDistanceMiles
         val shiftId = currentShiftId
+        serviceScope.launch {
+            val shift = db.shiftDao().getShiftById(shiftId)
+            shift?.let {
+                db.shiftDao().updateShift(it.copy(
+                    totalMiles = milesToSave,
+                    earnings = TaxConfig.calculateDeduction(milesToSave)
+                ))
+            }
+        }
+    }
+
+    private fun flushBuffer() {
+        if (locationBuffer.isEmpty()) return
+        val pointsToSave = ArrayList(locationBuffer)
+        locationBuffer.clear()
         
         serviceScope.launch {
             db.locationPointDao().insertLocationPoints(pointsToSave)
-            val shift = db.shiftDao().getShiftById(shiftId)
-            shift?.let {
-                db.shiftDao().updateShift(it.copy(totalMiles = milesToSave))
-            }
         }
     }
 
@@ -164,6 +176,7 @@ class LocationService : Service() {
 
     override fun onDestroy() {
         flushBuffer()
+        persistCurrentMileage()
         fusedLocationClient.removeLocationUpdates(locationCallback)
         serviceScope.cancel()
         _isTracking.value = false
