@@ -113,6 +113,12 @@ fun DashboardScreen(viewModel: DashboardViewModel, onPermissionRequest: () -> Un
                     "${"%.2f".format(mileage)} mi", 
                     style = MaterialTheme.typography.displayMedium
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Est. Deduction: $${"%.2f".format(mileage * 0.67)}",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
 
@@ -151,6 +157,6 @@ fun ShiftItem(shift: ShiftEntity) {
     ListItem(
         headlineContent = { Text("${"%.2f".format(shift.totalMiles)} miles") },
         supportingContent = { Text(dateFormat.format(Date(shift.startTime))) },
-        trailingContent = { Text("$${"%.2f".format(shift.earnings)}") }
+        trailingContent = { Text("-$${"%.2f".format(shift.earnings)}") }
     )
 }

@@ -27,6 +27,8 @@ class LocationService : Service() {
     private var lastLocation: Location? = null
     private var totalDistanceMiles: Double = 0.0
     private var currentShiftId: Long = -1
+    
+    private val locationBuffer = mutableListOf<LocationPointEntity>()
 
     companion object {
         private const val NOTIFICATION_CHANNEL_ID = "location_tracking_channel"
@@ -55,7 +57,19 @@ class LocationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        currentShiftId = intent?.getLongExtra("SHIFT_ID", -1) ?: -1
+        val shiftId = intent?.getLongExtra("SHIFT_ID", -1) ?: -1
+        if (shiftId != -1L) {
+            currentShiftId = shiftId
+            // Load existing mileage if this is a restart
+            serviceScope.launch {
+                val shift = db.shiftDao().getShiftById(currentShiftId)
+                shift?.let {
+                    totalDistanceMiles = it.totalMiles
+                    _mileageFlow.value = totalDistanceMiles
+                }
+            }
+        }
+        
         startForeground(NOTIFICATION_ID, createNotification())
         startLocationUpdates()
         _isTracking.value = true
@@ -85,24 +99,41 @@ class LocationService : Service() {
             totalDistanceMiles += distanceMiles
             _mileageFlow.value = totalDistanceMiles
             
-            // Update notification with live mileage
             updateNotification()
 
-            // Save point to DB
             if (currentShiftId != -1L) {
-                serviceScope.launch {
-                    db.locationPointDao().insertLocationPoint(
-                        LocationPointEntity(
-                            shiftId = currentShiftId,
-                            lat = newLocation.latitude,
-                            lng = newLocation.longitude,
-                            timestamp = System.currentTimeMillis()
-                        )
+                // Buffer the point
+                locationBuffer.add(
+                    LocationPointEntity(
+                        shiftId = currentShiftId,
+                        lat = newLocation.latitude,
+                        lng = newLocation.longitude,
+                        timestamp = System.currentTimeMillis()
                     )
+                )
+                
+                // Periodic save every 10 points or every few minutes
+                if (locationBuffer.size >= 10) {
+                    flushBuffer()
                 }
             }
         }
         lastLocation = newLocation
+    }
+
+    private fun flushBuffer() {
+        val pointsToSave = locationBuffer.toList()
+        locationBuffer.clear()
+        val milesToSave = totalDistanceMiles
+        val shiftId = currentShiftId
+        
+        serviceScope.launch {
+            db.locationPointDao().insertLocationPoints(pointsToSave)
+            val shift = db.shiftDao().getShiftById(shiftId)
+            shift?.let {
+                db.shiftDao().updateShift(it.copy(totalMiles = milesToSave))
+            }
+        }
     }
 
     private fun createNotificationChannel() {
@@ -132,13 +163,14 @@ class LocationService : Service() {
     }
 
     override fun onDestroy() {
-        super.onDestroy()
+        flushBuffer()
         fusedLocationClient.removeLocationUpdates(locationCallback)
         serviceScope.cancel()
         _isTracking.value = false
         lastLocation = null
         totalDistanceMiles = 0.0
         _mileageFlow.value = 0.0
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

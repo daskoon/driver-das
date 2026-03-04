@@ -40,13 +40,14 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
             }
             getApplication<Application>().startForegroundService(intent)
             
-            // Also start floating dashboard
             val floatIntent = Intent(getApplication(), FloatingService::class.java)
             getApplication<Application>().startService(floatIntent)
         }
     }
 
     private fun stopShift() {
+        val shiftIdToUpdate = currentShiftId
+        
         val intent = Intent(getApplication(), LocationService::class.java)
         getApplication<Application>().stopService(intent)
         
@@ -54,15 +55,19 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         getApplication<Application>().stopService(floatIntent)
 
         viewModelScope.launch {
-            val lastShift = shiftDao.getAllShifts().first().firstOrNull()
-            lastShift?.let {
+            val shift = db.shiftDao().getShiftById(shiftIdToUpdate)
+            shift?.let {
                 val updatedShift = it.copy(
                     endTime = System.currentTimeMillis(),
-                    totalMiles = currentMileage.value
+                    totalMiles = currentMileage.value,
+                    // Use standard mileage rate for 2024: $0.67
+                    earnings = currentMileage.value * 0.67 
                 )
-                shiftDao.updateShift(updatedShift)
+                db.shiftDao().updateShift(updatedShift)
             }
-            currentShiftId = -1
+            if (shiftIdToUpdate == currentShiftId) {
+                currentShiftId = -1
+            }
         }
     }
 }

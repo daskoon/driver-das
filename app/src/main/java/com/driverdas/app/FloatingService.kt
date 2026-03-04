@@ -42,7 +42,6 @@ class FloatingService : Service() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         
         composeView = ComposeView(this).apply {
-            // Needed for Compose inside a Service
             val viewModelStore = ViewModelStore()
             val lifecycleOwner = MyLifecycleOwner()
             lifecycleOwner.performRestore(null)
@@ -68,7 +67,9 @@ class FloatingService : Service() {
                                 change.consume()
                                 params.x += dragAmount.x.toInt()
                                 params.y += dragAmount.y.toInt()
-                                windowManager.updateViewLayout(composeView, params)
+                                try {
+                                    windowManager.updateViewLayout(composeView, params)
+                                } catch (e: Exception) {}
                             }
                         }
                 ) {
@@ -81,12 +82,8 @@ class FloatingService : Service() {
             }
         }
 
-        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-        } else {
-            @Suppress("DEPRECATION")
-            WindowManager.LayoutParams.TYPE_PHONE
-        }
+        // Use modern overlay type directly as minSdk is 26
+        val layoutType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
         params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -109,7 +106,9 @@ class FloatingService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        windowManager.removeView(composeView)
+        try {
+            windowManager.removeView(composeView)
+        } catch (e: Exception) {}
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -122,9 +121,10 @@ fun FloatingBubble(onExpand: () -> Unit) {
         modifier = Modifier
             .size(60.dp)
             .clip(CircleShape),
-        contentPadding = PaddingValues(0.dp)
+        contentPadding = PaddingValues(0.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
     ) {
-        Text("DAS")
+        Text("TAX")
     }
 }
 
@@ -132,27 +132,28 @@ fun FloatingBubble(onExpand: () -> Unit) {
 fun ExpandedCard(mileage: Double, onCollapse: () -> Unit) {
     Card(
         modifier = Modifier
-            .width(200.dp)
+            .width(180.dp)
             .wrapContentHeight(),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Current Shift", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-            Text("${"%.2f".format(mileage)} miles", style = MaterialTheme.typography.headlineSmall)
-            Spacer(modifier = Modifier.height(16.dp))
-            Button(onClick = onCollapse) {
-                Text("Minimize")
+            Text("Mileage", style = MaterialTheme.typography.labelMedium)
+            Text("${"%.2f".format(mileage)} mi", style = MaterialTheme.typography.titleLarge)
+            Spacer(modifier = Modifier.height(4.dp))
+            Text("Deduction", style = MaterialTheme.typography.labelSmall)
+            Text("$${"%.2f".format(mileage * 0.67)}", style = MaterialTheme.typography.titleMedium, color = Color(0xFF4CAF50))
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(onClick = onCollapse, modifier = Modifier.fillMaxWidth()) {
+                Text("Hide", style = MaterialTheme.typography.labelSmall)
             }
         }
     }
 }
 
-// Minimal LifecycleOwner for Compose in Service
 class MyLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
